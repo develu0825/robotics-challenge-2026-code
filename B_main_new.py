@@ -62,6 +62,19 @@ FIND_BACK = 30
 FIND_GRIP_MID = -640
 FIND_PULL = 20
 FIND_SQUEEZE = 15
+FIND_LAST_BACK = 20
+
+SPOT1_BACK = 50
+SPOT2_SHIFT = 150
+SPOT_FORWARD = 170
+
+SLOT_FIRST = 330
+SLOT_GAP = 100
+SLOT_IN = 170
+SLOT_OUT = 30
+WALL_BACK = 200
+WALL_PUSH = 30
+HOME_FROM_WALL = 200
 
 hub = PrimeHub()
 left = Motor(Port.C, LEFT_DIR)
@@ -82,6 +95,7 @@ lift.reset_angle(B_DOWN)
 color_sensor = ColorSensor(Port.E)
 
 target_heading = 0
+disc_count = 0
 
 
 def start_gyro():
@@ -244,6 +258,26 @@ def sweep():
     return False
 
 
+def grab(last=False):
+    global disc_count
+    if last:
+        straight(-FIND_LAST_BACK)
+        lift_down()
+        go = -FIND_LAST_BACK
+    else:
+        straight(-FIND_BACK)
+        lift_down()
+        straight(FIND_BACK + FIND_APPROACH)
+        go = FIND_APPROACH
+    motor_to(grip, GRIP_POWER, FIND_GRIP_MID, True, "grab")
+    straight(-FIND_PULL)
+    motor_to(grip, GRIP_POWER, A_CLOSED + FIND_SQUEEZE, True, "grab")
+    lift_up()
+    straight(-(go - FIND_PULL))
+    disc_count += 1
+    print("disc count:", disc_count)
+
+
 def find_disc():
     if abs(grip.angle() - A_OPEN) > 20:
         grip_open()
@@ -261,20 +295,76 @@ def find_disc():
     if found:
         print("find_disc: found on line", line + 1, "| angle", round(heading() - target_heading),
               "| reflection", color_sensor.reflection())
-        straight(-FIND_BACK)
-        lift_down()
-        straight(FIND_BACK + FIND_APPROACH)
-        motor_to(grip, GRIP_POWER, FIND_GRIP_MID, True, "find_disc")
-        straight(-FIND_PULL)
-        motor_to(grip, GRIP_POWER, A_CLOSED + FIND_SQUEEZE, True, "find_disc")
-        lift_up()
-        straight(-(FIND_APPROACH - FIND_PULL))
+        grab(line == FIND_STEPS - 1)
     else:
         print("find_disc: no disc on", FIND_STEPS, "lines")
     spin(0)
     if moved:
         straight(-moved)
     return found
+
+
+def check_spot():
+    if abs(grip.angle() - A_OPEN) > 20:
+        grip_open()
+    straight(SPOT_FORWARD)
+    robot.settings(turn_rate=FIND_TURN_RATE)
+    found = sweep()
+    robot.settings(turn_rate=TURN_RATE)
+    if found:
+        print("check_spot: found | angle", round(heading() - target_heading),
+              "| reflection", color_sensor.reflection())
+        grab()
+    else:
+        print("check_spot: no disc")
+    spin(0)
+    straight(-SPOT_FORWARD)
+
+
+def check_spot1():
+    spin(-90)
+    straight(-SPOT1_BACK)
+    pivot(90)
+    check_spot()
+    pivot(-90, forward=False)
+    straight(SPOT1_BACK)
+    spin(90)
+    print("check_spot1 | discs:", disc_count)
+    return disc_count
+
+
+def check_spot2():
+    spin(-90)
+    straight(SPOT2_SHIFT)
+    spin(90)
+    check_spot()
+    spin(-90)
+    straight(-SPOT2_SHIFT)
+    spin(90)
+    print("check_spot2 | discs:", disc_count)
+    return disc_count
+
+
+def deliver():
+    slot = SLOT_FIRST + SLOT_GAP * (disc_count - 1)
+    spin(-90)
+    straight(-WALL_BACK)
+    start_gyro()
+    straight(slot)
+    spin(90)
+    straight(SLOT_IN)
+    lift_place()
+    grip_open()
+    straight(-SLOT_OUT)
+    shake()
+    lift_up()
+    grip_close()
+    straight(-(SLOT_IN - SLOT_OUT))
+    spin(-90)
+    straight(-(slot + WALL_PUSH))
+    start_gyro()
+    straight(HOME_FROM_WALL)
+    spin(90)
 
 
 def ready():
@@ -316,7 +406,20 @@ if __name__ == "__main__":
 
     spin(90)
 
-    find_disc()
+    while disc_count < 3 and find_disc():
+        deliver()
+
+    if disc_count < 3:
+        before = disc_count
+        if check_spot1() > before:
+            deliver()
+
+    if disc_count < 3:
+        before = disc_count
+        if check_spot2() > before:
+            deliver()
+
+    print("finished | discs:", disc_count)
 
 
     # straight(100)
